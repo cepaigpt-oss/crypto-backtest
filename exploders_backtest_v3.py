@@ -184,8 +184,11 @@ def process_coin(c):
 # -------------------- Backtest --------------------
 def backtest():
     print("[Start] Backtest process initiated.", flush=True)
-    coins = get_top_coins(limit=500)
-    print(f"[Info] Retrieved {len(coins)} top market cap coins from CoinGecko.", flush=True)
+        from data_sources import get_combined_market_data
+
+    print("[Data] Fetching from multiple sources (CoinGecko, CoinMarketCap, Binance)...", flush=True)
+    coins = get_combined_market_data()
+    print(f"[Data] Retrieved {len(coins)} total assets from combined sources.", flush=True)
 
     entries = []
     total_coins = len(coins)
