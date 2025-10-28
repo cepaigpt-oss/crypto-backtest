@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 
+from data_sources import get_combined_market_data
+
 # -------------------- Parameters --------------------
 BASE = "https://api.coingecko.com/api/v3"
 CURRENCY = "usd"
@@ -184,7 +186,6 @@ def process_coin(c):
 # -------------------- Backtest --------------------
 def backtest():
     print("[Start] Backtest process initiated.", flush=True)
-        from data_sources import get_combined_market_data
 
     print("[Data] Fetching from multiple sources (CoinGecko, CoinMarketCap, Binance)...", flush=True)
     coins = get_combined_market_data()
