@@ -1,9 +1,11 @@
 import requests
-import time
-import random
 import os
 
 COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
+
+# -----------------------------
+# Individual Data Fetchers
+# -----------------------------
 
 def get_from_coingecko():
     try:
@@ -11,10 +13,21 @@ def get_from_coingecko():
         params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 100, "page": 1}
         resp = requests.get(url, params=params, timeout=20)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return [
+            {
+                "id": coin.get("id"),
+                "symbol": coin.get("symbol", "").upper(),
+                "price": coin.get("current_price"),
+                "volume": coin.get("total_volume"),
+                "source": "coingecko",
+            }
+            for coin in data
+        ]
     except Exception as e:
         print(f"[CoinGecko] Failed: {e}", flush=True)
         return []
+
 
 def get_from_coinmarketcap():
     try:
@@ -24,20 +37,45 @@ def get_from_coinmarketcap():
         resp = requests.get(url, headers=headers, params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json().get("data", [])
-        return [{"id": d["id"], "symbol": d["symbol"], "price": d["quote"]["USD"]["price"]} for d in data]
+        return [
+            {
+                "id": str(d.get("id")),
+                "symbol": d.get("symbol", "").upper(),
+                "price": d["quote"]["USD"].get("price"),
+                "volume": d["quote"]["USD"].get("volume_24h"),
+                "source": "coinmarketcap",
+            }
+            for d in data
+        ]
     except Exception as e:
         print(f"[CoinMarketCap] Failed: {e}", flush=True)
         return []
+
 
 def get_from_binance():
     try:
         url = "https://api.binance.com/api/v3/ticker/24hr"
         resp = requests.get(url, timeout=20)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return [
+            {
+                "id": b.get("symbol"),
+                "symbol": b.get("symbol", "").upper(),
+                "price": float(b.get("lastPrice", 0.0)),
+                "volume": float(b.get("quoteVolume", 0.0)),
+                "source": "binance",
+            }
+            for b in data
+        ]
     except Exception as e:
         print(f"[Binance] Failed: {e}", flush=True)
         return []
+
+
+# -----------------------------
+# Combined Fetcher with Deduplication
+# -----------------------------
 
 def get_combined_market_data():
     print("[Data] Fetching from multiple sources...", flush=True)
@@ -55,8 +93,17 @@ def get_combined_market_data():
 
     binance = get_from_binance()
     if binance:
-        print(f"[Data] Binance returned {len(binance)} coins", flush=True)
+        print(f"[Data] Binance returned {len(binance)} tickers", flush=True)
         all_data.extend(binance)
 
-    print(f"[Data] Combined total assets fetched: {len(all_data)}", flush=True)
-    return all_data
+    # Deduplicate by symbol (case-insensitive)
+    seen = set()
+    unique_data = []
+    for coin in all_data:
+        symbol = coin["symbol"].upper()
+        if symbol not in seen:
+            seen.add(symbol)
+            unique_data.append(coin)
+
+    print(f"[Data] Combined total (after deduplication): {len(unique_data)}", flush=True)
+    return unique_data
