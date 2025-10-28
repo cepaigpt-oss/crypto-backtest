@@ -40,26 +40,36 @@ MAX_WORKERS = 10
 BASE_DELAY = 10  # seconds for backoff base
 HEARTBEAT_INTERVAL = 120  # 2 minutes
 
-# -------------------- Helper Functions --------------------
+# ------------------ Helper Functions ------------------
 def safe_get(url, params=None):
     """Perform GET with adaptive rate limit handling."""
     for attempt in range(6):
         try:
             response = requests.get(url, params=params, timeout=30)
+
+            # Handle rate limits gracefully
             if response.status_code == 429:
-                wait = BASE_DELAY * (2 ** attempt) + random.uniform(1, 3)
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    wait = float(retry_after)
+                else:
+                    # fall back to adaptive exponential + random backoff
+                    wait = BASE_DELAY * (2 ** attempt) + random.uniform(3, 7)
                 print(f"[RateLimit] 429 Too Many Requests. Waiting {wait:.1f}s before retrying...", flush=True)
                 time.sleep(wait)
                 continue
+
+            # If successful, return parsed JSON
             response.raise_for_status()
             return response.json()
+
         except requests.exceptions.RequestException as e:
-            wait = BASE_DELAY * (2 ** attempt)
-            print(f"[Warning] Request failed ({e}). Retrying in {wait}s...", flush=True)
+            wait = BASE_DELAY * (2 ** attempt) + random.uniform(2, 5)
+            print(f"[Warning] Request failed ({e}). Retrying in {wait:.1f}s...", flush=True)
             time.sleep(wait)
+
     print("[Error] Max retries reached for request.", flush=True)
     return None
-
 
 def get_top_coins(limit=500):
     """Fetch top N coins by market cap."""
