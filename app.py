@@ -1,19 +1,24 @@
 from flask import Flask, jsonify
-from exploders_backtest_v2 import backtest
+import threading
+import subprocess
+import time
 
 app = Flask(__name__)
 
-@app.route("/")
+@app.route('/')
 def home():
     return jsonify({"message": "Crypto Backtest API is live!"})
 
-@app.route("/run", methods=["GET"])
+@app.route('/run', methods=['GET'])
 def run_backtest():
-    try:
-        backtest()
-        return jsonify({"status": "success", "message": "Backtest completed"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    def run_script():
+        subprocess.run(["python", "exploders_backtest_v3.py"], check=False)
+    thread = threading.Thread(target=run_script)
+    thread.start()
+    return jsonify({
+        "status": "Backtest started",
+        "message": "exploders_backtest_v3.py is running in the background."
+    })
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
