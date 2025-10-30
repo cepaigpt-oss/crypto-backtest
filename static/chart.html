@@ -52,6 +52,23 @@
   <script>
     let chartInstance = null;
 
+    // Convert UTC time string (e.g., "2025-10-30 09:27:13 UTC") to Adelaide local time
+    function convertToAdelaideTime(utcString) {
+      try {
+        const utcDate = new Date(utcString.replace(" UTC", "Z"));
+        // Intl.DateTimeFormat handles DST automatically for Adelaide
+        const formatter = new Intl.DateTimeFormat("en-AU", {
+          timeZone: "Australia/Adelaide",
+          year: "numeric", month: "2-digit", day: "2-digit",
+          hour: "2-digit", minute: "2-digit", second: "2-digit",
+          hour12: false
+        });
+        return formatter.format(utcDate) + " (Adelaide)";
+      } catch {
+        return utcString; // fallback
+      }
+    }
+
     async function loadData() {
       const container = document.getElementById("container");
       const summaryDiv = document.getElementById("summary");
@@ -100,15 +117,16 @@
           });
         }
 
-        // Summary metrics
+        // Summary metrics with Adelaide time conversion
         const s = data.summary;
+        const adelaideTime = s.last_run_time ? convertToAdelaideTime(s.last_run_time) : "N/A";
         summaryDiv.innerHTML = `
           <div class="metric"><strong>Final Equity:</strong> ${s.final_equity}</div>
           <div class="metric"><strong>Total Trades:</strong> ${s.total_trades}</div>
-          <div class="metric"><strong>Last Run:</strong> ${s.last_run_time}</div>
+          <div class="metric"><strong>Last Run:</strong> ${adelaideTime}</div>
         `;
 
-        // Last updated time (local)
+        // Last updated time (browser local)
         const now = new Date();
         lastUpdatedDiv.textContent = `Last updated: ${now.toLocaleString()}`;
 
@@ -118,7 +136,7 @@
       }
     }
 
-    // Load immediately
+    // Initial load
     loadData();
 
     // 🔁 Auto-refresh every 15 minutes (900000 ms)
