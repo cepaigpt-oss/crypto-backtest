@@ -123,6 +123,12 @@ def get_results():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+from flask import send_from_directory
+
+@app.route('/chart.html')
+def serve_chart():
+    """Serve the standalone chart HTML for Wix embedding."""
+    return send_from_directory('static', 'chart.html')
 
 # -------------------- Main Entry Point --------------------
 if __name__ == '__main__':
