@@ -2,17 +2,16 @@
 # Flask-based Crypto Backtest API with daily scheduler and safe JSON endpoints
 # -------------------------------------------------------------
 
-from flask import Flask, jsonify
-from flask_cors import CORS  # 👈 NEW import
+from flask import Flask, jsonify, send_from_directory
 import threading
 import subprocess
 import time
 from datetime import datetime
 import pandas as pd
 import os
+from zoneinfo import ZoneInfo  # ✅ Handles automatic ACST/ACDT switching
 
 app = Flask(__name__)
-CORS(app)  # 👈 Enable CORS globally for all routes (needed for Wix)
 
 last_run_time = None  # track last automatic run time
 
@@ -21,7 +20,12 @@ last_run_time = None  # track last automatic run time
 def run_backtest_script():
     """Run exploders_backtest_v3.py as a subprocess."""
     global last_run_time
-    last_run_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # 🕓 Get UTC time and convert to Adelaide local time (auto ACST/ACDT)
+    now_utc = datetime.now(tz=ZoneInfo("UTC"))
+    now_adl = now_utc.astimezone(ZoneInfo("Australia/Adelaide"))
+    last_run_time = now_adl.strftime("%Y-%m-%d %H:%M:%S %Z")
+
     print(f"[Scheduler] Starting backtest at {last_run_time}", flush=True)
     try:
         subprocess.run(["python", "exploders_backtest_v3.py"], check=False)
@@ -45,7 +49,6 @@ def safe_read_csv(filename):
     try:
         if not os.path.exists(filename) or os.path.getsize(filename) == 0:
             return None
-        # peek at first few bytes to ensure there’s real data
         with open(filename, "r", encoding="utf-8") as f:
             head = f.read(100).strip()
             if not head:
@@ -79,18 +82,16 @@ def run_backtest_manual():
     })
 
 
-@app.route('/api/results', methods=['GET'])  # 👈 updated path for clarity
+@app.route('/results', methods=['GET'])
 def get_results():
     """Return latest backtest results as JSON for Wix dashboard."""
     try:
-        # ---- Load files safely ----
         curve_df = safe_read_csv("equity_curve.csv")
         trades_df = safe_read_csv("trades.csv")
 
         if curve_df is None:
             return jsonify({"error": "equity_curve.csv not found or empty. Run the backtest first."}), 404
 
-        # ---- If no trades ----
         if trades_df is None or trades_df.empty:
             summary = {
                 "last_run_time": last_run_time,
@@ -105,7 +106,6 @@ def get_results():
                 "recent_trades": []
             })
 
-        # ---- Normal case ----
         summary = {
             "last_run_time": last_run_time,
             "total_trades": int(len(trades_df)),
@@ -123,18 +123,15 @@ def get_results():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-from flask import send_from_directory
 
 @app.route('/chart.html')
 def serve_chart():
     """Serve the standalone chart HTML for Wix embedding."""
     return send_from_directory('static', 'chart.html')
 
+
 # -------------------- Main Entry Point --------------------
 if __name__ == '__main__':
-    # Start the daily scheduler thread
     scheduler_thread = threading.Thread(target=daily_scheduler, daemon=True)
     scheduler_thread.start()
-
-    # Run Flask development server
     app.run(host='0.0.0.0', port=8080)
