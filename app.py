@@ -3,6 +3,8 @@ import threading
 import subprocess
 import time
 from datetime import datetime
+import pandas as pd
+import os
 
 app = Flask(__name__)
 
@@ -45,6 +47,41 @@ def run_backtest_manual():
         "status": "Backtest started",
         "message": "exploders_backtest_v3.py is running in the background."
     })
+
+
+@app.route('/results', methods=['GET'])
+def get_results():
+    """Return the latest backtest results as JSON for Wix dashboard."""
+    try:
+        # Ensure files exist before reading
+        if not os.path.exists("trades.csv") or not os.path.exists("equity_curve.csv"):
+            return jsonify({
+                "error": "No results found yet. Run the backtest first via /run or wait for the daily scheduler."
+            }), 404
+
+        trades_df = pd.read_csv("trades.csv")
+        curve_df = pd.read_csv("equity_curve.csv")
+
+        # Build summary
+        summary = {
+            "last_run_time": last_run_time,
+            "total_trades": int(len(trades_df)),
+            "final_equity": round(float(curve_df["equity"].iloc[-1]), 2) if not curve_df.empty else None,
+            "first_trade_date": trades_df["entry_date"].iloc[0] if not trades_df.empty else None,
+            "last_trade_date": trades_df["exit_date"].iloc[-1] if not trades_df.empty else None
+        }
+
+        # Return a compact version (not all rows)
+        response = {
+            "summary": summary,
+            "equity_curve": curve_df.tail(30).to_dict(orient="records"),  # last 30 days for performance
+            "recent_trades": trades_df.tail(10).to_dict(orient="records")  # last 10 trades
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':
