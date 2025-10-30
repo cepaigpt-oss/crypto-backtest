@@ -33,6 +33,11 @@
       background: #f8f9fa;
       box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
+    #lastUpdated {
+      margin-top: 10px;
+      color: #555;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
@@ -42,47 +47,58 @@
     <canvas id="equityChart" style="display:none"></canvas>
   </div>
   <div id="summary"></div>
+  <div id="lastUpdated"></div>
 
   <script>
+    let chartInstance = null;
+
     async function loadData() {
       const container = document.getElementById("container");
       const summaryDiv = document.getElementById("summary");
+      const lastUpdatedDiv = document.getElementById("lastUpdated");
 
       try {
-        // ✅ Corrected endpoint (removed /api)
-        const response = await fetch("https://crypto-backtest.onrender.com/results");
+        const response = await fetch("https://crypto-backtest.onrender.com/results", { cache: "no-store" });
         const data = await response.json();
 
-        // Show chart
-        document.querySelector("p").remove();
+        // Remove "Loading..." text
+        const loadingText = document.querySelector("#container p");
+        if (loadingText) loadingText.remove();
         document.getElementById("equityChart").style.display = "block";
 
         // Prepare chart data
         const labels = data.equity_curve.map(i => i.date);
         const equity = data.equity_curve.map(i => i.equity);
 
-        // Draw chart
-        new Chart(document.getElementById("equityChart"), {
-          type: "line",
-          data: {
-            labels,
-            datasets: [{
-              label: "Equity Curve",
-              data: equity,
-              borderColor: "#36A2EB",
-              backgroundColor: "rgba(54,162,235,0.1)",
-              fill: true,
-              tension: 0.25
-            }]
-          },
-          options: {
-            responsive: true,
-            scales: {
-              x: { title: { display: true, text: "Date" } },
-              y: { title: { display: true, text: "Equity" } }
+        // If chart already exists, update it
+        if (chartInstance) {
+          chartInstance.data.labels = labels;
+          chartInstance.data.datasets[0].data = equity;
+          chartInstance.update();
+        } else {
+          // Create new chart
+          chartInstance = new Chart(document.getElementById("equityChart"), {
+            type: "line",
+            data: {
+              labels,
+              datasets: [{
+                label: "Equity Curve",
+                data: equity,
+                borderColor: "#36A2EB",
+                backgroundColor: "rgba(54,162,235,0.1)",
+                fill: true,
+                tension: 0.25
+              }]
+            },
+            options: {
+              responsive: true,
+              scales: {
+                x: { title: { display: true, text: "Date" } },
+                y: { title: { display: true, text: "Equity" } }
+              }
             }
-          }
-        });
+          });
+        }
 
         // Summary metrics
         const s = data.summary;
@@ -92,13 +108,21 @@
           <div class="metric"><strong>Last Run:</strong> ${s.last_run_time}</div>
         `;
 
+        // Last updated time (local)
+        const now = new Date();
+        lastUpdatedDiv.textContent = `Last updated: ${now.toLocaleString()}`;
+
       } catch (err) {
         container.innerHTML = "<p style='color:red'>❌ Failed to load data.</p>";
-        console.error(err);
+        console.error("Error loading data:", err);
       }
     }
 
+    // Load immediately
     loadData();
+
+    // 🔁 Auto-refresh every 15 minutes (900000 ms)
+    setInterval(loadData, 900000);
   </script>
 </body>
 </html>
