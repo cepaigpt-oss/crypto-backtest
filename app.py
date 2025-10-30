@@ -1,8 +1,9 @@
 # app.py
-# Flask-based Crypto Backtest API with daily scheduler and safe JSON endpoints
+# Flask-based Crypto Backtest API with daily scheduler, CORS for Wix, and Adelaide timezone
 # -------------------------------------------------------------
 
 from flask import Flask, jsonify, send_from_directory
+from flask_cors import CORS  # ✅ NEW: enable CORS for mobile/Wix access
 import threading
 import subprocess
 import time
@@ -12,6 +13,8 @@ import os
 from zoneinfo import ZoneInfo  # ✅ Handles automatic ACST/ACDT switching
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})  # ✅ Allow all origins (test mode)
+# Later, replace "*" with ["https://yourwixsite.wixsite.com"] for extra security
 
 last_run_time = None  # track last automatic run time
 
