@@ -1,6 +1,7 @@
-"""
+""" 
 Backtest: Small-cap 100% Exploders Continuation Strategy (Multithreaded + Adaptive Rate Limiting + Heartbeat)
 Balanced concurrency (10 threads), adaptive CoinGecko rate limiting, and periodic heartbeat logging for Render.
+Includes CoinGecko ID validation to avoid 404 errors.
 """
 
 import math
@@ -55,7 +56,6 @@ def safe_get(url, params=None):
                 if retry_after:
                     wait = float(retry_after)
                 else:
-                    # fall back to adaptive exponential + random backoff
                     wait = BASE_DELAY * (2 ** attempt) + random.uniform(3, 7)
                 print(f"[RateLimit] 429 Too Many Requests. Waiting {wait:.1f}s before retrying...", flush=True)
                 time.sleep(wait)
@@ -72,6 +72,7 @@ def safe_get(url, params=None):
 
     print("[Error] Max retries reached for request.", flush=True)
     return None
+
 
 def get_top_coins(limit=500):
     """Fetch top N coins by market cap."""
@@ -102,7 +103,10 @@ def to_daily_df(mc):
         return None
     df = pd.DataFrame({"ts": [p[0] for p in mc["prices"]], "close": [p[1] for p in mc["prices"]]})
     n = len(df)
-    def _safe(arr): return [x[1] for x in arr][:n] if arr else [np.nan]*n
+
+    def _safe(arr): 
+        return [x[1] for x in arr][:n] if arr else [np.nan]*n
+
     df["mcap"] = _safe(mc.get("market_caps", []))
     df["vol"] = _safe(mc.get("total_volumes", []))
     df["date"] = pd.to_datetime(df["ts"], unit="ms", utc=True).dt.normalize()
@@ -143,9 +147,40 @@ def first_confirmation_idx(df, sig_idx):
     return None
 
 
+# -------------------- New: Validate CoinGecko IDs --------------------
+def validate_coingecko_ids(coins):
+    """Ensure coins have valid CoinGecko string IDs."""
+    valid_ids = set()
+    try:
+        print("[Init] Fetching CoinGecko coin list for ID validation...", flush=True)
+        all_coins = requests.get(f"{BASE}/coins/list", timeout=60).json()
+        valid_ids = {c["id"] for c in all_coins}
+        print(f"[Init] Retrieved {len(valid_ids)} valid CoinGecko IDs.", flush=True)
+    except Exception as e:
+        print(f"[Warning] Could not fetch CoinGecko list: {e}", flush=True)
+        return coins  # fallback if offline
+
+    fixed = []
+    for c in coins:
+        cid = str(c.get("id", "")).lower().strip()
+        if cid in valid_ids:
+            fixed.append(c)
+        elif "symbol" in c and c["symbol"].lower() in valid_ids:
+            c["id"] = c["symbol"].lower()
+            fixed.append(c)
+        else:
+            print(f"[Skip] Invalid CoinGecko ID: {cid}", flush=True)
+    print(f"[Filter] Using {len(fixed)}/{len(coins)} valid CoinGecko coins.", flush=True)
+    return fixed
+
+
 def process_coin(c):
     """Main per-coin backtest logic."""
     cid = c["id"]
+    if not isinstance(cid, str) or cid.isdigit():
+        print(f"[Skip] Skipping invalid coin id: {cid}", flush=True)
+        return []
+
     mc = market_chart_range(cid, START - 5 * 24 * 3600, END + 24 * 3600)
     if mc is None:
         return []
@@ -186,10 +221,13 @@ def process_coin(c):
 # -------------------- Backtest --------------------
 def backtest():
     print("[Start] Backtest process initiated.", flush=True)
-
     print("[Data] Fetching from multiple sources (CoinGecko, CoinMarketCap, Binance)...", flush=True)
+
     coins = get_combined_market_data()
     print(f"[Data] Retrieved {len(coins)} total assets from combined sources.", flush=True)
+
+    # ✅ Validate and filter CoinGecko IDs
+    coins = validate_coingecko_ids(coins)
 
     entries = []
     total_coins = len(coins)
