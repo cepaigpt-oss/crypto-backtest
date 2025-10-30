@@ -1,3 +1,7 @@
+# app.py
+# Flask-based Crypto Backtest API with daily scheduler and safe JSON endpoints
+# -------------------------------------------------------------
+
 from flask import Flask, jsonify
 import threading
 import subprocess
@@ -8,9 +12,10 @@ import os
 
 app = Flask(__name__)
 
-last_run_time = None  # track last automatic run
+last_run_time = None  # track last automatic run time
 
 
+# -------------------- Backtest Execution --------------------
 def run_backtest_script():
     """Run exploders_backtest_v3.py as a subprocess."""
     global last_run_time
@@ -18,20 +23,43 @@ def run_backtest_script():
     print(f"[Scheduler] Starting backtest at {last_run_time}", flush=True)
     try:
         subprocess.run(["python", "exploders_backtest_v3.py"], check=False)
+        print("[Scheduler] Backtest completed.", flush=True)
     except Exception as e:
         print(f"[Scheduler Error] {e}", flush=True)
 
 
+# -------------------- Daily Scheduler --------------------
 def daily_scheduler():
-    """Runs the backtest automatically every 24 hours."""
+    """Automatically run the backtest every 24 hours."""
     while True:
         run_backtest_script()
         print("[Scheduler] Sleeping for 24 hours...", flush=True)
         time.sleep(24 * 3600)
 
 
+# -------------------- Helper Function --------------------
+def safe_read_csv(filename):
+    """Safely read a CSV — return None if file empty or unreadable."""
+    try:
+        if not os.path.exists(filename) or os.path.getsize(filename) == 0:
+            return None
+        # peek at first few bytes to ensure there’s real data
+        with open(filename, "r", encoding="utf-8") as f:
+            head = f.read(100).strip()
+            if not head:
+                return None
+        return pd.read_csv(filename)
+    except pd.errors.EmptyDataError:
+        return None
+    except Exception as e:
+        print(f"[Warning] Could not read {filename}: {e}", flush=True)
+        return None
+
+
+# -------------------- Flask Routes --------------------
 @app.route('/')
 def home():
+    """Base endpoint for health check."""
     return jsonify({
         "message": "Crypto Backtest API is live!",
         "last_auto_run": last_run_time
@@ -51,42 +79,54 @@ def run_backtest_manual():
 
 @app.route('/results', methods=['GET'])
 def get_results():
-    """Return the latest backtest results as JSON for Wix dashboard."""
+    """Return latest backtest results as JSON for Wix dashboard."""
     try:
-        # Ensure files exist before reading
-        if not os.path.exists("trades.csv") or not os.path.exists("equity_curve.csv"):
+        # ---- Load files safely ----
+        curve_df = safe_read_csv("equity_curve.csv")
+        trades_df = safe_read_csv("trades.csv")
+
+        if curve_df is None:
+            return jsonify({"error": "equity_curve.csv not found or empty. Run the backtest first."}), 404
+
+        # ---- If no trades ----
+        if trades_df is None or trades_df.empty:
+            summary = {
+                "last_run_time": last_run_time,
+                "total_trades": 0,
+                "final_equity": round(float(curve_df["equity"].iloc[-1]), 2) if not curve_df.empty else None,
+                "note": "No trades were generated in this backtest run."
+            }
+
             return jsonify({
-                "error": "No results found yet. Run the backtest first via /run or wait for the daily scheduler."
-            }), 404
+                "summary": summary,
+                "equity_curve": curve_df.to_dict(orient="records"),
+                "recent_trades": []
+            })
 
-        trades_df = pd.read_csv("trades.csv")
-        curve_df = pd.read_csv("equity_curve.csv")
-
-        # Build summary
+        # ---- Normal case ----
         summary = {
             "last_run_time": last_run_time,
             "total_trades": int(len(trades_df)),
             "final_equity": round(float(curve_df["equity"].iloc[-1]), 2) if not curve_df.empty else None,
-            "first_trade_date": trades_df["entry_date"].iloc[0] if not trades_df.empty else None,
-            "last_trade_date": trades_df["exit_date"].iloc[-1] if not trades_df.empty else None
+            "first_trade_date": trades_df["entry_date"].iloc[0] if "entry_date" in trades_df.columns else None,
+            "last_trade_date": trades_df["exit_date"].iloc[-1] if "exit_date" in trades_df.columns else None
         }
 
-        # Return a compact version (not all rows)
-        response = {
+        return jsonify({
             "summary": summary,
-            "equity_curve": curve_df.tail(30).to_dict(orient="records"),  # last 30 days for performance
-            "recent_trades": trades_df.tail(10).to_dict(orient="records")  # last 10 trades
-        }
-
-        return jsonify(response)
+            "equity_curve": curve_df.tail(30).to_dict(orient="records"),
+            "recent_trades": trades_df.tail(10).to_dict(orient="records")
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
+# -------------------- Main Entry Point --------------------
 if __name__ == '__main__':
-    # start the daily scheduler in a separate thread
+    # Start the daily scheduler thread
     scheduler_thread = threading.Thread(target=daily_scheduler, daemon=True)
     scheduler_thread.start()
 
+    # Run Flask development server
     app.run(host='0.0.0.0', port=8080)

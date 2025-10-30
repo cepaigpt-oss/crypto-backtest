@@ -38,8 +38,8 @@ ATR_LEN = 14
 ATR_MULT_STOP = 3.0
 HARD_HOLD_DAYS = 10
 
-API_SLEEP = 0.0  # throttle
-MAX_WORKERS = 10  # Balanced multithreading speed
+API_SLEEP = 0.0
+MAX_WORKERS = 10
 
 # -------------------- Helpers --------------------
 def get_top_coins(limit=500):
@@ -169,14 +169,17 @@ def backtest():
     entries_df = pd.DataFrame(entries)
     if not entries_df.empty:
         entries_df["date"] = pd.to_datetime(entries_df["date"], utc=True)
+
     equity = 100.0
     open_positions = []
     trades = []
     curve = []
+
     for d in tqdm(all_dates, desc="Backtest Progress"):
         todays = []
         if not entries_df.empty:
             todays = entries_df[entries_df["date"] == d].sort_values("vol_mult", ascending=False).to_dict("records")
+
         slots = MAX_CONCURRENT - len(open_positions)
         for ent in todays[:slots]:
             risk_per_unit = ent["entry_px"] - ent["stop"]
@@ -197,26 +200,47 @@ def backtest():
                 "max_hold": HARD_HOLD_DAYS,
                 "bars_held": 0
             })
+
         still_open = []
         for pos in open_positions:
             pos["bars_held"] += 1
             if pos["bars_held"] >= pos["max_hold"]:
-                pnl = (pos["entry_px"] * 1.1 - pos["entry_px"]) * pos["qty"]
+                # Exit: time-based take-profit (10%)
+                exit_px = pos["entry_px"] * 1.1 * (1 - FEE_PER_SIDE)
+                pnl = (exit_px - pos["entry_px"]) * pos["qty"]
                 equity += pnl
-                trades.append({"coin": pos["coin"], "entry_date": pos["entry_date"], "exit_date": d, "pnl": pnl, "reason": "time"})
+                trades.append({
+                    "coin": pos["coin"],
+                    "entry_date": pos["entry_date"],
+                    "entry_px": pos["entry_px"],
+                    "exit_date": d,
+                    "exit_px": exit_px,
+                    "bars_held": pos["bars_held"],
+                    "pnl": pnl,
+                    "reason": "time"
+                })
             else:
                 still_open.append(pos)
         open_positions = still_open
         curve.append({"date": d, "equity": equity})
+
     curve_df = pd.DataFrame(curve)
     trades_df = pd.DataFrame(trades)
+
+    # Save results
+    curve_df.to_csv("equity_curve.csv", index=False)
+    trades_df.to_csv("trades.csv", index=False)
+
     print("\n--- Results ---")
     print(f"Start Equity: $100.00")
     print(f"End Equity ({END_DT.date()} UTC): ${equity:,.2f}")
     print(f"Total Trades: {len(trades_df)}")
-    curve_df.to_csv("equity_curve.csv", index=False)
-    trades_df.to_csv("trades.csv", index=False)
-    print("Saved: equity_curve.csv, trades.csv")
+    if not trades_df.empty:
+        print("\nTop 10 Trades by Profit:")
+        print(trades_df.sort_values('pnl', ascending=False).head(10)[
+            ["coin", "entry_date", "exit_date", "entry_px", "exit_px", "pnl"]
+        ])
+        print("\nSaved: equity_curve.csv, trades.csv")
 
 if __name__ == "__main__":
     backtest()
