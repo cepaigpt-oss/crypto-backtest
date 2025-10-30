@@ -3,6 +3,7 @@
 # -------------------------------------------------------------
 
 from flask import Flask, jsonify
+from flask_cors import CORS  # 👈 NEW import
 import threading
 import subprocess
 import time
@@ -11,6 +12,7 @@ import pandas as pd
 import os
 
 app = Flask(__name__)
+CORS(app)  # 👈 Enable CORS globally for all routes (needed for Wix)
 
 last_run_time = None  # track last automatic run time
 
@@ -77,7 +79,7 @@ def run_backtest_manual():
     })
 
 
-@app.route('/results', methods=['GET'])
+@app.route('/api/results', methods=['GET'])  # 👈 updated path for clarity
 def get_results():
     """Return latest backtest results as JSON for Wix dashboard."""
     try:
